@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import connection from "./database.js";
 
-import { categorieSchema, gameSchema } from "./schemas.js";
+import { categorieSchema, gameSchema, costumerSchema } from "./schemas.js";
 
 const app = express();
 app.use(cors());
@@ -105,12 +105,114 @@ app.post("/games", async (req, res) => {
           VALUES($1, $2, $3, $4, $5)`,
       [name, image, stockTotal, categoryId, pricePerDay]
     );
-
     res.sendStatus(201);
   } catch (erro) {
-    console.log(erro);
     return res.sendStatus(500);
   }
+});
+
+app.get("/customers", async (req, res) => {
+  try {
+    if (req.query.cpf) {
+      let cpf = req.query.cpf.replace(/\D/g, "");
+      const result = await connection.query(
+        `SELECT * FROM customers
+            WHERE customers.cpf LIKE $1;`,
+        [cpf + "%"]
+      );
+      res.json(result.rows);
+    } else {
+      const result = await connection.query(`SELECT * FROM customers`);
+      res.json(result.rows);
+    }
+  } catch (error) {
+    console.log(error);
+    res.sendStatus(400);
+  }
+});
+
+app.get("/customers/:id", async (req, res) => {
+  console.log(req.params.id);
+  const { id } = req.params;
+  try {
+    const result = await connection.query(
+      `SELECT * FROM customers WHERE id = $1`,
+      [id]
+    );
+    result.rows.length > 0 ? res.json(result.rows[0]) : res.sendStatus(404);
+  } catch (error) {
+    console.log(error);
+    res.sendStatus(400);
+  }
+});
+
+app.post("/customers", async (req, res) => {
+  req.body.cpf = req.body.cpf.replace(/\D/g, "");
+  req.body.phone = req.body.phone.replace(/\D/g, "");
+  const validNumbers =
+    /^\d+$/.test(req.body.cpf) && /^\d+$/.test(req.body.phone);
+
+  if (costumerSchema.validate(req.body).error || !validNumbers) {
+    return res.sendStatus(400);
+  }
+
+  const { name, phone, cpf, birthday } = req.body;
+
+  try {
+    let result = await connection.query(
+      `SELECT * FROM customers WHERE cpf=$1`,
+      [cpf]
+    );
+
+    if (result.rows.length > 0) {
+      return res.sendStatus(409);
+    }
+
+    await connection.query(
+      `INSERT INTO customers (name, phone, cpf, birthday) VALUES ($1, $2, $3, $4)`,
+      [name, phone, cpf, birthday]
+    );
+  } catch (error) {
+    console.log(error);
+    return res.sendStatus(500);
+  }
+  res.sendStatus(201);
+});
+
+app.put("/customers/:id", async (req, res) => {
+  req.body.cpf = req.body.cpf.replace(/\D/g, "");
+  req.body.phone = req.body.phone.replace(/\D/g, "");
+  const validNumbers =
+    /^\d+$/.test(req.body.cpf) && /^\d+$/.test(req.body.phone);
+
+  if (costumerSchema.validate(req.body).error || !validNumbers) {
+    return res.sendStatus(400);
+  }
+
+  const { name, phone, cpf, birthday } = req.body;
+  const { id } = req.params;
+
+  try {
+    let result = await connection.query(
+      `SELECT * FROM customers WHERE cpf=$1`,
+      [cpf]
+    );
+
+    result.rows = result.rows.filter((r) => r.id != id);
+
+    if (result.rows.length > 0) {
+      return res.sendStatus(409);
+    }
+
+    await connection.query(
+      `UPDATE customers SET name=$2, phone=$3, cpf=$4, birthday=$5 WHERE id = $1`,
+      [id, name, phone, cpf, birthday]
+    );
+  } catch (error) {
+    console.log(error);
+    return res.sendStatus(500);
+  }
+  res.sendStatus(200);
 });
 
 app.listen(4000, () => console.log("Server listening on port 4000..."));
