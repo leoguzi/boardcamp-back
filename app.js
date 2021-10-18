@@ -1,8 +1,14 @@
 import express from "express";
 import cors from "cors";
 import connection from "./database.js";
+import dayjs from "dayjs";
 
-import { categorieSchema, gameSchema, costumerSchema } from "./schemas.js";
+import {
+  categorieSchema,
+  gameSchema,
+  customerSchema,
+  rentalSchema,
+} from "./schemas.js";
 
 const app = express();
 app.use(cors());
@@ -57,15 +63,15 @@ app.get("/games", async (req, res) => {
         `SELECT games.*, categories.name as "categoryName" 
           FROM games JOIN categories 
             ON games."categoryId"=categories.id
-            WHERE games.name LIKE $1;`,
+              WHERE games.name LIKE $1;`,
         [name + "%"]
       );
       res.json(result.rows);
     } else {
       const result = await connection.query(
         `SELECT games.*, categories.name as "categoryName" 
-        FROM games JOIN categories 
-          ON games."categoryId"=categories.id;`
+          FROM games JOIN categories 
+            ON games."categoryId"=categories.id;`
       );
       res.json(result.rows);
     }
@@ -101,8 +107,13 @@ app.post("/games", async (req, res) => {
     }
 
     await connection.query(
-      `INSERT INTO games (name, image, "stockTotal", "categoryId", "pricePerDay") 
-          VALUES($1, $2, $3, $4, $5)`,
+      `INSERT INTO games (
+        name, 
+        image, 
+        "stockTotal",
+        "categoryId", 
+        "pricePerDay") 
+          VALUES($1, $2, $3, $4, $5);`,
       [name, image, stockTotal, categoryId, pricePerDay]
     );
     res.sendStatus(201);
@@ -122,7 +133,7 @@ app.get("/customers", async (req, res) => {
       );
       res.json(result.rows);
     } else {
-      const result = await connection.query(`SELECT * FROM customers`);
+      const result = await connection.query(`SELECT * FROM customers;`);
       res.json(result.rows);
     }
   } catch (error) {
@@ -136,7 +147,7 @@ app.get("/customers/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const result = await connection.query(
-      `SELECT * FROM customers WHERE id = $1`,
+      `SELECT * FROM customers WHERE id = $1;`,
       [id]
     );
     result.rows.length > 0 ? res.json(result.rows[0]) : res.sendStatus(404);
@@ -160,7 +171,7 @@ app.post("/customers", async (req, res) => {
 
   try {
     let result = await connection.query(
-      `SELECT * FROM customers WHERE cpf=$1`,
+      `SELECT * FROM customers WHERE cpf=$1;`,
       [cpf]
     );
 
@@ -169,7 +180,7 @@ app.post("/customers", async (req, res) => {
     }
 
     await connection.query(
-      `INSERT INTO customers (name, phone, cpf, birthday) VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO customers (name, phone, cpf, birthday) VALUES ($1, $2, $3, $4);`,
       [name, phone, cpf, birthday]
     );
   } catch (error) {
@@ -185,7 +196,7 @@ app.put("/customers/:id", async (req, res) => {
   const validNumbers =
     /^\d+$/.test(req.body.cpf) && /^\d+$/.test(req.body.phone);
 
-  if (costumerSchema.validate(req.body).error || !validNumbers) {
+  if (customerSchema.validate(req.body).error || !validNumbers) {
     return res.sendStatus(400);
   }
 
@@ -194,7 +205,7 @@ app.put("/customers/:id", async (req, res) => {
 
   try {
     let result = await connection.query(
-      `SELECT * FROM customers WHERE cpf=$1`,
+      `SELECT * FROM customers WHERE cpf=$1;`,
       [cpf]
     );
 
@@ -205,7 +216,7 @@ app.put("/customers/:id", async (req, res) => {
     }
 
     await connection.query(
-      `UPDATE customers SET name=$2, phone=$3, cpf=$4, birthday=$5 WHERE id = $1`,
+      `UPDATE customers SET name=$2, phone=$3, cpf=$4, birthday=$5 WHERE id = $1;`,
       [id, name, phone, cpf, birthday]
     );
   } catch (error) {
@@ -213,6 +224,98 @@ app.put("/customers/:id", async (req, res) => {
     return res.sendStatus(500);
   }
   res.sendStatus(200);
+});
+
+app.get("/rentals", async (req, res) => {
+  try {
+    let result = await connection.query(
+      `SELECT rentals.*, 
+      customers.id as "costumerID", customers.name as "customerName", 
+      games.id as "gameId", games.name as "gameName", games."categoryId" as "categoryId", 
+      categories.name as "categoryName"
+          FROM rentals
+            JOIN customers
+              ON rentals."customerId" = customers.id
+            JOIN games
+              ON rentals."gameId"= games.id
+            JOIN categories 
+              on games."categoryId" = categories.id;`
+    );
+    result = result.rows.map((row) => {
+      return {
+        id: row.id,
+        customerId: row.customerId,
+        gameId: row.gameId,
+        rentDate: row.rentDate,
+        daysRented: row.rentDate,
+        returnDate: row.returnDate,
+        originalPrice: row.originalPrice,
+        delayFee: row.delayFee,
+        customer: {
+          id: row.customerId,
+          name: row.customerName,
+        },
+        game: {
+          id: row.gameId,
+          name: row.gameName,
+          categoryId: row.categoryId,
+          categoryName: row.categoryName,
+        },
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.log(error);
+    return res.sendStatus(500);
+  }
+});
+
+app.post("/rentals", async (req, res) => {
+  if (rentalSchema.validate(req.body).error) {
+    return res.sendStatus(400);
+  }
+  const { customerId, gameId, daysRented } = req.body;
+  const rentDate = dayjs().format("YYYY-MM-DD");
+  try {
+    let rentals = await connection.query(
+      `SELECT * FROM rentals WHERE "gameId"=$1`,
+      [gameId]
+    );
+    const customer = await connection.query(
+      `SELECT * FROM customers WHERE id = $1;`,
+      [customerId]
+    );
+    let game = await connection.query(`SELECT * FROM games WHERE id = $1;`, [
+      gameId,
+    ]);
+    if (
+      customer.rows.length === 0 ||
+      game.rows.length === 0 ||
+      rentals.rows.lengh >= game.stockTotal
+    ) {
+      return res.sendStatus(400);
+    }
+    game = game.rows[0];
+    const originalPrice = game.pricePerDay * daysRented;
+
+    const result = await connection.query(
+      `INSERT INTO rentals (
+        "customerId", 
+        "gameId", 
+        "rentDate", 
+        "daysRented", 
+        "returnDate", 
+        "originalPrice", 
+        "delayFee")
+          VALUES($1, $2, $3, $4, $5, $6, $7);`,
+      [customerId, gameId, rentDate, daysRented, null, originalPrice, null]
+    );
+    res.sendStatus(201);
+  } catch (error) {
+    console.log(error);
+    return res.sendStatus(500);
+  }
 });
 
 app.listen(4000, () => console.log("Server listening on port 4000..."));
