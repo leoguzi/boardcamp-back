@@ -368,7 +368,6 @@ app.post("/rentals/:id/return", async (req, res) => {
       return res.sendStatus(404);
     }
     if (result.rows[0].returnDate) {
-      console.log(result.rows[0].returnDate);
       return res.sendStatus(400);
     }
     const rental = result.rows[0];
@@ -391,7 +390,6 @@ app.post("/rentals/:id/return", async (req, res) => {
     );
     res.sendStatus(200);
   } catch (error) {
-    console.log(error);
     return res.sendStatus(500);
   }
 });
