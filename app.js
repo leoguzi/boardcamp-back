@@ -1,4 +1,4 @@
-import express from "express";
+import express, { query } from "express";
 import cors from "cors";
 import connection from "./database.js";
 import dayjs from "dayjs";
@@ -76,7 +76,6 @@ app.get("/games", async (req, res) => {
       res.json(result.rows);
     }
   } catch (error) {
-    console.log(error);
     res.sendStatus(400);
   }
 });
@@ -137,13 +136,11 @@ app.get("/customers", async (req, res) => {
       res.json(result.rows);
     }
   } catch (error) {
-    console.log(error);
     res.sendStatus(400);
   }
 });
 
 app.get("/customers/:id", async (req, res) => {
-  console.log(req.params.id);
   const { id } = req.params;
   try {
     const result = await connection.query(
@@ -152,7 +149,6 @@ app.get("/customers/:id", async (req, res) => {
     );
     result.rows.length > 0 ? res.json(result.rows[0]) : res.sendStatus(404);
   } catch (error) {
-    console.log(error);
     res.sendStatus(400);
   }
 });
@@ -184,7 +180,6 @@ app.post("/customers", async (req, res) => {
       [name, phone, cpf, birthday]
     );
   } catch (error) {
-    console.log(error);
     return res.sendStatus(500);
   }
   res.sendStatus(201);
@@ -220,7 +215,6 @@ app.put("/customers/:id", async (req, res) => {
       [id, name, phone, cpf, birthday]
     );
   } catch (error) {
-    console.log(error);
     return res.sendStatus(500);
   }
   res.sendStatus(200);
@@ -228,9 +222,44 @@ app.put("/customers/:id", async (req, res) => {
 
 app.get("/rentals", async (req, res) => {
   try {
-    let result = await connection.query(
-      `SELECT rentals.*, 
-      customers.id as "costumerID", customers.name as "customerName", 
+    let result = [];
+    const { customerId, gameId } = req.query;
+    if (customerId) {
+      result = await connection.query(
+        `SELECT rentals.*, 
+        customers.id as "customerId", customers.name as "customerName", 
+        games.id as "gameId", games.name as "gameName", games."categoryId" as "categoryId", 
+        categories.name as "categoryName"
+            FROM rentals
+              JOIN customers
+                ON rentals."customerId" = customers.id
+              JOIN games
+                ON rentals."gameId"= games.id
+              JOIN categories 
+                on games."categoryId" = categories.id
+                  WHERE rentals."customerId"= $1;`,
+        [req.query.customerId]
+      );
+    } else if (gameId) {
+      result = await connection.query(
+        `SELECT rentals.*, 
+          customers.id as "customerId", customers.name as "customerName", 
+          games.id as "gameId", games.name as "gameName", games."categoryId" as "categoryId", 
+          categories.name as "categoryName"
+              FROM rentals
+                JOIN customers
+                  ON rentals."customerId" = customers.id
+                JOIN games
+                  ON rentals."gameId"= games.id
+                JOIN categories 
+                  on games."categoryId" = categories.id
+                    WHERE rentals."gameId"= $1;`,
+        [req.query.gameId]
+      );
+    } else {
+      result = await connection.query(
+        `SELECT rentals.*, 
+      customers.id as "customerId", customers.name as "customerName", 
       games.id as "gameId", games.name as "gameName", games."categoryId" as "categoryId", 
       categories.name as "categoryName"
           FROM rentals
@@ -240,14 +269,16 @@ app.get("/rentals", async (req, res) => {
               ON rentals."gameId"= games.id
             JOIN categories 
               on games."categoryId" = categories.id;`
-    );
+      );
+    }
+
     result = result.rows.map((row) => {
       return {
         id: row.id,
         customerId: row.customerId,
         gameId: row.gameId,
         rentDate: row.rentDate,
-        daysRented: row.rentDate,
+        daysRented: row.daysRented,
         returnDate: row.returnDate,
         originalPrice: row.originalPrice,
         delayFee: row.delayFee,
@@ -266,7 +297,6 @@ app.get("/rentals", async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.log(error);
     return res.sendStatus(500);
   }
 });
@@ -282,6 +312,7 @@ app.post("/rentals", async (req, res) => {
       `SELECT * FROM rentals WHERE "gameId"=$1`,
       [gameId]
     );
+
     const customer = await connection.query(
       `SELECT * FROM customers WHERE id = $1;`,
       [customerId]
@@ -292,7 +323,7 @@ app.post("/rentals", async (req, res) => {
     if (
       customer.rows.length === 0 ||
       game.rows.length === 0 ||
-      rentals.rows.lengh >= game.stockTotal
+      rentals.rows.length >= game.rows[0].stockTotal
     ) {
       return res.sendStatus(400);
     }
@@ -313,7 +344,26 @@ app.post("/rentals", async (req, res) => {
     );
     res.sendStatus(201);
   } catch (error) {
-    console.log(error);
+    return res.sendStatus(500);
+  }
+});
+
+app.delete("/rentals/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await connection.query(
+      `SELECT * FROM rentals WHERE id = $1;`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.sendStatus(404);
+    }
+    if (result.rows[0].returnDate !== null) {
+      return res.sendStatus(400);
+    }
+    await connection.query(`DELETE FROM rentals WHERE ID = $1;`, [id]);
+    res.sendStatus(200);
+  } catch (error) {
     return res.sendStatus(500);
   }
 });
