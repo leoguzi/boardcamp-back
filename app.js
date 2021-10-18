@@ -158,8 +158,13 @@ app.post("/customers", async (req, res) => {
   req.body.phone = req.body.phone.replace(/\D/g, "");
   const validNumbers =
     /^\d+$/.test(req.body.cpf) && /^\d+$/.test(req.body.phone);
+  const validBirthday = new Date() - new Date(req.body.birthday).getTime() > 0;
 
-  if (costumerSchema.validate(req.body).error || !validNumbers) {
+  if (
+    customerSchema.validate(req.body).error ||
+    !validNumbers ||
+    !validBirthday
+  ) {
     return res.sendStatus(400);
   }
 
@@ -190,8 +195,12 @@ app.put("/customers/:id", async (req, res) => {
   req.body.phone = req.body.phone.replace(/\D/g, "");
   const validNumbers =
     /^\d+$/.test(req.body.cpf) && /^\d+$/.test(req.body.phone);
-
-  if (customerSchema.validate(req.body).error || !validNumbers) {
+  const validBirthday = new Date() - new Date(req.body.birthday).getTime() > 0;
+  if (
+    customerSchema.validate(req.body).error ||
+    !validNumbers ||
+    !validBirthday
+  ) {
     return res.sendStatus(400);
   }
 
@@ -344,6 +353,45 @@ app.post("/rentals", async (req, res) => {
     );
     res.sendStatus(201);
   } catch (error) {
+    return res.sendStatus(500);
+  }
+});
+
+app.post("/rentals/:id/return", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await connection.query(
+      `SELECT * FROM rentals WHERE ID = $1;`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.sendStatus(404);
+    }
+    if (result.rows[0].returnDate) {
+      console.log(result.rows[0].returnDate);
+      return res.sendStatus(400);
+    }
+    const rental = result.rows[0];
+    const rentDate = new Date(rental.rentDate);
+    const returnDate = new Date();
+    const timeDiff = Math.abs(returnDate.getTime() - rentDate.getTime());
+    const diffDays = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    let game = await connection.query(`SELECT * FROM games WHERE id = $1;`, [
+      rental.gameId,
+    ]);
+    game = game.rows[0];
+
+    let delayFee = null;
+    diffDays > rental.daysRented
+      ? (delayFee = game.pricePerDay * (diffDays - rental.daysRented))
+      : (delayFee = 0);
+    await connection.query(
+      `UPDATE rentals SET "returnDate" = $2, "delayFee"= $3 WHERE id = $1`,
+      [rental.id, returnDate, delayFee]
+    );
+    res.sendStatus(200);
+  } catch (error) {
+    console.log(error);
     return res.sendStatus(500);
   }
 });
